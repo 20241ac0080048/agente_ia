@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>IA Agente Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .chat-container { background: #1e1e1e; width: 90%; max-width: 500px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .historico { height: 400px; overflow-y: auto; background: #252525; padding: 15px; border-radius: 10px; margin-bottom: 15px; display: flex; flex-direction: column; }
+        .mensagem { margin-bottom: 15px; padding: 10px 15px; border-radius: 15px; max-width: 80%; line-height: 1.4; }
+        .user { background: #007bff; align-self: flex-end; color: white; }
+        .bot { background: #444; align-self: flex-start; color: #eee; }
+        .controles { display: flex; gap: 10px; }
+        input { flex-grow: 1; padding: 12px; border: none; border-radius: 5px; background: #333; color: white; }
+        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-enviar { background: #28a745; color: white; }
+        .btn-limpar { background: #dc3545; color: white; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <h2>🤖 Meu Agente Inteligente</h2>
+        <div class="historico" id="historico"></div>
+        <div class="controles">
+            <input type="text" id="pergunta" placeholder="Pergunte algo...">
+            <button class="btn-enviar" onclick="enviarMensagem()">Enviar</button>
+            <button class="btn-limpar" onclick="limparChat()">🗑️</button>
+        </div>
+    </div>
+
+    <script>
+        const URL_BACKEND = "http://localhost:3000/api/chat";
+
+async function enviarMensagem() {
+    const input = document.getElementById("pergunta");
+    const historico = document.getElementById("historico");
+    const texto = input.value;
+    if(!texto) return;
+
+    // Adiciona pergunta na tela
+    historico.innerHTML += `<div class="mensagem user">${texto}</div>`;
+    input.value = "";
+    
+    // Cria o balão de "carregando"
+    const loadingDiv = document.createElement("div");
+    loadingDiv.className = "mensagem bot";
+    loadingDiv.innerText = "Pensando, eu estou...";
+    historico.appendChild(loadingDiv);
+    historico.scrollTop = historico.scrollHeight;
+
+    try {
+        const res = await fetch(URL_BACKEND, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pergunta: texto })
+        });
+        
+        const dados = await res.json();
+        
+        // Remove o "carregando"
+        loadingDiv.remove();
+        
+        // Mostra resposta formatada
+        const respostaFinal = dados.resposta || dados.erro;
+        const divResposta = document.createElement("div");
+        divResposta.className = "mensagem bot";
+        divResposta.innerHTML = marked.parse(respostaFinal);
+        historico.appendChild(divResposta);
+        
+        historico.scrollTop = historico.scrollHeight;
+    } catch (err) {
+        loadingDiv.innerText = "Conectar ao servidor, eu não consegui. Verifique se ele está ligado.";
+        console.error(err);
+    }
+}
+
+async function limparChat() {
+    if(confirm("Apagar minhas memórias, você deseja?")) {
+        await fetch(URL_BACKEND + "/limpar", { method: "DELETE" });
+        document.getElementById("historico").innerHTML = "";
+    }
+}
+ </script>
+</body>
+</html>

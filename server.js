@@ -1,35 +1,20 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const mongoose = require('mongoose');
+const chatRoutes = require('./routes/chatRoutes');
 
 const app = express();
 app.use(express.json());
-app.use(cors()); // Necessário para o seu Front-end conversar com o Back-end
+app.use(cors());
 
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(apiKey);
+// Conexão com o Banco de Dados
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("✅ Conectado ao MongoDB"))
+    .catch(err => console.error("❌ Erro ao conectar ao MongoDB:", err));
 
-// A ROTA QUE O FRONT-END VAI CHAMAR
-app.post('/api/chat', async (req, res) => {
-    try {
-        // Usa o prompt que você definiu, mas agora recebe a pergunta do Body
-        const { pergunta } = req.body;
-        
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const prompt = `Aja como o Mestre Yoda de Star Wars. Explique: ${pergunta}`;
+// Rotas
+app.use('/api/chat', chatRoutes);
 
-        const result = await model.generateContent(prompt);
-        const resposta = result.response.text();
-
-        res.json({ resposta: resposta });
-    } catch (erro) {
-        res.status(500).json({ erro: erro.message });
-    }
-});
-
-// A NUVEM ESCOLHE A PORTA
 const PORTA = process.env.PORT || 3000;
-app.listen(PORTA, () => {
-    console.log(`🚀 Servidor rodando na porta ${PORTA}`);
-});
+app.listen(PORTA, () => console.log(`🚀 Servidor rodando na porta ${PORTA}`));
