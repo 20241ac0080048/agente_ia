@@ -2,85 +2,260 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>IA Agente Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agente IA Cloud - Sprint 5 & 6</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .chat-container { background: #1e1e1e; width: 90%; max-width: 500px; padding: 20px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .historico { height: 400px; overflow-y: auto; background: #252525; padding: 15px; border-radius: 10px; margin-bottom: 15px; display: flex; flex-direction: column; }
-        .mensagem { margin-bottom: 15px; padding: 10px 15px; border-radius: 15px; max-width: 80%; line-height: 1.4; }
-        .user { background: #007bff; align-self: flex-end; color: white; }
-        .bot { background: #444; align-self: flex-start; color: #eee; }
-        .controles { display: flex; gap: 10px; }
-        input { flex-grow: 1; padding: 12px; border: none; border-radius: 5px; background: #333; color: white; }
-        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .btn-enviar { background: #28a745; color: white; }
-        .btn-limpar { background: #dc3545; color: white; }
+        * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body { background: #121212; color: #fff; margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .card { background: #1e1e1e; width: 95%; max-width: 520px; padding: 25px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        .status { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #aaa; margin-bottom: 15px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #666; }
+        .dot.online { background: #28a745; box-shadow: 0 0 8px #28a745; }
+        .dot.offline { background: #dc3545; box-shadow: 0 0 8px #dc3545; }
+        .historico { height: 350px; overflow-y: auto; background: #262626; border-radius: 8px; padding: 15px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .msg { padding: 10px 14px; border-radius: 10px; max-width: 80%; line-height: 1.4; word-wrap: break-word; }
+        .msg.user { background: #007bff; align-self: flex-end; }
+        .msg.bot { background: #3a3a3a; align-self: flex-start; }
+        input, button, select { padding: 12px; border-radius: 6px; border: none; font-size: 0.95rem; }
+        input { background: #333; color: white; width: 100%; margin-bottom: 10px; }
+        button { cursor: pointer; font-weight: bold; }
+        .btn-green { background: #28a745; color: white; }
+        .btn-red { background: #dc3545; color: white; }
+        .btn-gray { background: #555; color: white; }
+        .row { display: flex; gap: 8px; }
+        .row input { margin-bottom: 0; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 15px; }
+        .tab-btn { flex: 1; padding: 8px; background: #333; color: #bbb; }
+        .tab-btn.active { background: #007bff; color: white; }
+        #error-msg { color: #ff6b6b; font-size: 0.85rem; }
     </style>
 </head>
 <body>
-    <div class="chat-container">
-        <h2>🤖 Meu Agente Inteligente</h2>
+
+    <!-- TELA 1: LOGIN / CADASTRO -->
+    <div class="card" id="view-login">
+        <h2>🔐 Acesso ao Agente</h2>
+        <input type="email" id="email" placeholder="Seu e-mail">
+        <input type="password" id="senha" placeholder="Sua senha">
+        <div class="row">
+            <button class="btn-green" style="flex:1" onclick="entrar()">Entrar</button>
+            <button class="btn-gray" style="flex:1" onclick="cadastrar()">Cadastrar</button>
+        </div>
+        <p id="error-msg"></p>
+    </div>
+
+    <!-- TELA 2: CHAT E RAG -->
+    <div class="card" id="view-chat" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h2>🤖 Agente Inteligente</h2>
+            <button class="btn-gray" style="padding:6px 12px;" onclick="sair()">Sair</button>
+        </div>
+
+        <div class="status">
+            <span class="dot" id="status-dot"></span>
+            <span id="status-text">Checando servidor...</span>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-conversa" onclick="trocarModo('conversa')">💬 Chat Yoda</button>
+            <button class="tab-btn" id="tab-doc" onclick="trocarModo('doc')">📄 Modo PDF (RAG)</button>
+        </div>
+
         <div class="historico" id="historico"></div>
-        <div class="controles">
-            <input type="text" id="pergunta" placeholder="Pergunte algo...">
-            <button class="btn-enviar" onclick="enviarMensagem()">Enviar</button>
-            <button class="btn-limpar" onclick="limparChat()">🗑️</button>
+
+        <!-- MODO CHAT NORMAL -->
+        <div id="modo-conversa">
+            <div class="row">
+                <input type="text" id="pergunta-texto" placeholder="Pergunte sobre algo ou sobre o clima...">
+                <button class="btn-green" onclick="enviarChat()">Enviar</button>
+                <button class="btn-red" title="Limpar Memória" onclick="limparHistorico()">🗑️</button>
+            </div>
+        </div>
+
+        <!-- MODO RAG (Sprint 6) -->
+        <div id="modo-doc" style="display:none;">
+            <input type="file" id="arquivo-pdf" accept=".pdf,.txt">
+            <div class="row">
+                <input type="text" id="pergunta-doc" placeholder="Pergunta estrita sobre o arquivo...">
+                <button class="btn-green" onclick="enviarRAG()">Analisar</button>
+            </div>
         </div>
     </div>
 
     <script>
-        const URL_BACKEND = "http://localhost:3000/api/chat";
+        const API_BASE = window.location.origin;
 
-async function enviarMensagem() {
-    const input = document.getElementById("pergunta");
-    const historico = document.getElementById("historico");
-    const texto = input.value;
-    if(!texto) return;
+        // Health Check (Sprint 5)
+        async function checarSaude() {
+            const dot = document.getElementById('status-dot');
+            const txt = document.getElementById('status-text');
+            try {
+                const res = await fetch(`${API_BASE}/api/health`);
+                const data = await res.json();
+                if (data.bancoDeDados === 'conectado') {
+                    dot.className = 'dot online';
+                    txt.textContent = 'Online (MongoDB Conectado)';
+                } else {
+                    dot.className = 'dot offline';
+                    txt.textContent = 'Online (MongoDB Desconectado)';
+                }
+            } catch (e) {
+                dot.className = 'dot offline';
+                txt.textContent = 'API Offline';
+            }
+        }
 
-    // Adiciona pergunta na tela
-    historico.innerHTML += `<div class="mensagem user">${texto}</div>`;
-    input.value = "";
-    
-    // Cria o balão de "carregando"
-    const loadingDiv = document.createElement("div");
-    loadingDiv.className = "mensagem bot";
-    loadingDiv.innerText = "Pensando, eu estou...";
-    historico.appendChild(loadingDiv);
-    historico.scrollTop = historico.scrollHeight;
+        function trocarModo(modo) {
+            document.getElementById('modo-conversa').style.display = modo === 'conversa' ? 'block' : 'none';
+            document.getElementById('modo-doc').style.display = modo === 'doc' ? 'block' : 'none';
+            document.getElementById('tab-conversa').className = `tab-btn ${modo === 'conversa' ? 'active' : ''}`;
+            document.getElementById('tab-doc').className = `tab-btn ${modo === 'doc' ? 'active' : ''}`;
+        }
 
-    try {
-        const res = await fetch(URL_BACKEND, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pergunta: texto })
-        });
-        
-        const dados = await res.json();
-        
-        // Remove o "carregando"
-        loadingDiv.remove();
-        
-        // Mostra resposta formatada
-        const respostaFinal = dados.resposta || dados.erro;
-        const divResposta = document.createElement("div");
-        divResposta.className = "mensagem bot";
-        divResposta.innerHTML = marked.parse(respostaFinal);
-        historico.appendChild(divResposta);
-        
-        historico.scrollTop = historico.scrollHeight;
-    } catch (err) {
-        loadingDiv.innerText = "Conectar ao servidor, eu não consegui. Verifique se ele está ligado.";
-        console.error(err);
-    }
-}
+        async function entrar() {
+            const email = document.getElementById('email').value;
+            const senha = document.getElementById('senha').value;
+            const err = document.getElementById('error-msg');
+            err.textContent = '';
 
-async function limparChat() {
-    if(confirm("Apagar minhas memórias, você deseja?")) {
-        await fetch(URL_BACKEND + "/limpar", { method: "DELETE" });
-        document.getElementById("historico").innerHTML = "";
-    }
-}
- </script>
+            try {
+                const res = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, senha })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.erro || 'Falha no login');
+
+                localStorage.setItem('token', data.token);
+                carregarApp();
+            } catch (e) {
+                err.textContent = e.message;
+            }
+        }
+
+        async function cadastrar() {
+            const email = document.getElementById('email').value;
+            const senha = document.getElementById('senha').value;
+            const err = document.getElementById('error-msg');
+            err.textContent = '';
+
+            try {
+                const res = await fetch(`${API_BASE}/api/auth/cadastro`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, senha })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.erro || 'Falha no cadastro');
+                alert('Conta cadastrada! Agora clique em Entrar.');
+            } catch (e) {
+                err.textContent = e.message;
+            }
+        }
+
+        function sair() {
+            localStorage.removeItem('token');
+            document.getElementById('view-chat').style.display = 'none';
+            document.getElementById('view-login').style.display = 'block';
+        }
+
+        function adicionarMsg(texto, tipo) {
+            const hist = document.getElementById('historico');
+            const div = document.createElement('div');
+            div.className = `msg ${tipo}`;
+            div.innerHTML = DOMPurify.sanitize(marked.parse(texto));
+            hist.appendChild(div);
+            hist.scrollTop = hist.scrollHeight;
+            return div;
+        }
+
+        async function enviarChat() {
+            const input = document.getElementById('pergunta-texto');
+            const texto = input.value.trim();
+            if (!texto) return;
+
+            adicionarMsg(texto, 'user');
+            input.value = '';
+            const loading = adicionarMsg('Pensando, o Mestre Yoda está...', 'bot');
+
+            try {
+                const res = await fetch(`${API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({ pergunta: texto })
+                });
+                const data = await res.json();
+                loading.remove();
+                adicionarMsg(data.resposta || data.erro, 'bot');
+            } catch (e) {
+                loading.innerText = 'Falha ao comunicar com o servidor.';
+            }
+        }
+
+        async function enviarRAG() {
+            const fileInput = document.getElementById('arquivo-pdf');
+            const questInput = document.getElementById('pergunta-doc');
+            const pergunta = questInput.value.trim();
+            const file = fileInput.files[0];
+
+            if (!file || !pergunta) {
+                alert('Selecione um arquivo e digite uma pergunta.');
+                return;
+            }
+
+            adicionarMsg(`[Documento: ${file.name}] ${pergunta}`, 'user');
+            questInput.value = '';
+            const loading = adicionarMsg('Lendo documento com precisão corporativa...', 'bot');
+
+            const formData = new FormData();
+            formData.append('documento', file);
+            formData.append('pergunta', pergunta);
+
+            try {
+                const res = await fetch(`${API_BASE}/api/chat/documento`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+                    body: formData
+                });
+                const data = await res.json();
+                loading.remove();
+                adicionarMsg(data.resposta || data.erro, 'bot');
+            } catch (e) {
+                loading.innerText = 'Erro ao consultar documento.';
+            }
+        }
+
+        async function limparHistorico() {
+            if (!confirm('Deseja apagar o histórico salvo?')) return;
+            try {
+                await fetch(`${API_BASE}/api/chat/limpar`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                });
+                document.getElementById('historico').innerHTML = '';
+            } catch (e) {
+                alert('Erro ao limpar.');
+            }
+        }
+
+        function carregarApp() {
+            if (localStorage.getItem('token')) {
+                document.getElementById('view-login').style.display = 'none';
+                document.getElementById('view-chat').style.display = 'block';
+                checarSaude();
+            } else {
+                document.getElementById('view-chat').style.display = 'none';
+                document.getElementById('view-login').style.display = 'block';
+            }
+        }
+
+        carregarApp();
+    </script>
 </body>
 </html>

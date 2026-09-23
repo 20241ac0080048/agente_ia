@@ -1,8 +1,10 @@
 const mongoose = require('mongoose');
 
 const MensagemSchema = new mongoose.Schema({
-    role: { type: String, required: true },
-    parts: [{ text: { type: String, required: true }, _id: false }]
+    usuarioId: { type: mongoose.Schema.Types.ObjectId, ref: 'Usuario', required: true },
+    remetente: { type: String, enum: ['user', 'bot'], required: true },
+    texto: { type: String, required: true },
+    criadoEm: { type: Date, default: Date.now }
 });
 
 module.exports = mongoose.model('Mensagem', MensagemSchema);

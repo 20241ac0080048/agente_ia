@@ -1,45 +1,97 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const Mensagem = require("../models/Mensagem");
+const Mensagem = require('../models/Mensagem');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// Função da ferramenta de Clima
+async function buscarClimaTempoReal(cidade) {
+    const weatherKey = process.env.WEATHER_API_KEY;
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cidade)}&units=metric&lang=pt_br&appid=${weatherKey}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.cod !== 200) return { erro: "Cidade não encontrada" };
+        return {
+            temperatura: data.main.temp,
+            descricao: data.weather[0].description,
+            cidade: data.name
+        };
+    } catch (e) {
+        return { erro: "Falha na conexão com a API de clima." };
+    }
+}
+
+// Declaração da Tool
+const declaracaoClima = {
+    name: "buscarClimaTempoReal",
+    description: "Obtém a temperatura e clima de uma cidade. Use sempre que o usuário perguntar de tempo ou temperatura.",
+    parameters: {
+        type: "OBJECT",
+        properties: {
+            cidade: { type: "STRING", description: "O nome da cidade. Ex: Curitiba, Paris." }
+        },
+        required: ["cidade"]
+    }
+};
 
 exports.conversar = async (req, res) => {
     try {
         const { pergunta } = req.body;
+        const usuarioId = req.usuario.id;
 
-        // 1. Pega o histórico e transforma em texto puro para o Google não reclamar
-        const historicoBanco = await Mensagem.find().limit(10).lean();
-        const history = historicoBanco.map(m => ({
-            role: m.role === "model" ? "model" : "user",
-            parts: [{ text: String(m.parts[0].text) }]
-        }));
+        if (!pergunta) {
+            return res.status(400).json({ erro: "Pergunta não informada." });
+        }
 
-        // 2. Usa o modelo padrão. Se gemini-1.5-flash der 404, usaremos o nome completo.
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // Salva a mensagem do usuário no banco
+        await Mensagem.create({ usuarioId, remetente: 'user', texto: pergunta });
 
-        // 3. Monta a pergunta com o Yoda
-        const promptYoda = `Aja como o Mestre Yoda. Responda em Português: ${pergunta}`;
-        
-        // 4. Envia direto (Sem ferramentas de clima por enquanto, para não dar erro!)
-        const result = await model.generateContent({
-            contents: [...history, { role: "user", parts: [{ text: promptYoda }] }]
+        // Inicializa Gemini com Ferramenta
+        const model = genAI.getGenerativeModel({
+            model: "gemini-2.5-flash",
+            tools: [{ functionDeclarations: [declaracaoClima] }]
         });
 
-        const textoIA = result.response.text();
+        const chat = model.startChat();
+        const promptYoda = `Você é o Mestre Yoda de Star Wars. Fale no estilo do Mestre Yoda. Pergunta do usuário: ${pergunta}`;
+        
+        let result = await chat.sendMessage(promptYoda);
+        let response = result.response;
 
-        // 5. Salva no banco
-        await new Mensagem({ role: "user", parts: [{ text: pergunta }] }).save();
-        await new Mensagem({ role: "model", parts: [{ text: textoIA }] }).save();
+        // Loop de Function Calling
+        const call = response.functionCalls()?.[0];
+        let respostaFinalTexto = "";
 
-        res.json({ resposta: textoIA });
+        if (call && call.name === "buscarClimaTempoReal") {
+            const dadosClima = await buscarClimaTempoReal(call.args.cidade);
+            const result2 = await chat.sendMessage([{
+                functionResponse: {
+                    name: "buscarClimaTempoReal",
+                    response: { content: dadosClima }
+                }
+            }]);
+            respostaFinalTexto = result2.response.text();
+        } else {
+            respostaFinalTexto = response.text();
+        }
 
+        // Salva a resposta do bot no banco
+        await Mensagem.create({ usuarioId, remetente: 'bot', texto: respostaFinalTexto });
+
+        res.json({ resposta: respostaFinalTexto });
     } catch (erro) {
-        console.error(erro);
-        res.status(500).json({ resposta: "Erro: " + erro.message });
+        console.error("Erro no chat:", erro);
+        res.status(500).json({ erro: "Erro ao processar mensagem com a IA." });
     }
 };
 
 exports.limparHistorico = async (req, res) => {
-    await Mensagem.deleteMany({});
-    res.json({ msg: "Limpo!" });
+    try {
+        const usuarioId = req.usuario.id;
+        await Mensagem.deleteMany({ usuarioId });
+        res.json({ msg: "Memória limpa com sucesso!" });
+    } catch (erro) {
+        console.error(erro);
+        res.status(500).json({ erro: "Erro ao limpar histórico." });
+    }
 };
