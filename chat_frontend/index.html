@@ -99,6 +99,7 @@
             } catch (e) {
                 err.textContent = e.message;
             }
+            localStorage.setItem('role', data.role);
         }
 
         async function cadastrar() {
@@ -228,6 +229,9 @@
                 document.getElementById('view-chat').style.display = 'none';
                 document.getElementById('view-login').style.display = 'block';
             }
+            if (localStorage.getItem('role') === 'admin') {
+    document.getElementById('link-admin').style.display = 'inline';
+}
         }
 
         carregarApp();

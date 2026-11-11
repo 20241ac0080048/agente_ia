@@ -15,7 +15,8 @@ exports.cadastrar = async (req, res) => {
         }
 
         const senhaHash = await bcrypt.hash(senha, 10);
-        const novoUsuario = new Usuario({ email, senha: senhaHash });
+        // Novos usuários nascem como 'user' por padrão
+        const novoUsuario = new Usuario({ email, senha: senhaHash, role: "user" });
         await novoUsuario.save();
 
         res.status(201).json({ msg: 'Usuário cadastrado com sucesso!' });
@@ -42,13 +43,14 @@ exports.login = async (req, res) => {
             return res.status(401).json({ erro: 'Credenciais inválidas.' });
         }
 
+        // Injeta id, email E role dentro do Token JWT
         const token = jwt.sign(
-            { id: usuario._id, email: usuario.email },
+            { id: usuario._id, email: usuario.email, role: usuario.role || "user" },
             process.env.JWT_SECRET,
             { expiresIn: '4h' }
         );
 
-        res.json({ token, email: usuario.email });
+        res.json({ token, email: usuario.email, role: usuario.role || "user" });
     } catch (erro) {
         console.error(erro);
         res.status(500).json({ erro: 'Erro ao realizar login.' });

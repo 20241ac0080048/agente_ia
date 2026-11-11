@@ -1,4 +1,9 @@
 require('dotenv').config();
+
+// Forçar DNS Público para o MongoDB
+const dns = require('node:dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -10,24 +15,23 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const authRoutes = require('./routes/authRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 const auth = require('./middleware/auth');
+const Mensagem = require('./models/Mensagem');
 
 const app = express();
+// ... segue o restante normal do arquivo
 const server = http.createServer(app);
 
-// Configuração do Socket.io com CORS liberado
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 app.use(express.json());
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'chat_frontend')));
 
-// --- ROTA DE HEALTH CHECK (Sprint 5) ---
+// Health Check (Sprint 5)
 app.get('/api/health', (req, res) => {
     const estadoConexao = mongoose.connection.readyState;
     res.status(200).json({
@@ -37,46 +41,44 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Rotas HTTP existentes
+// Rotas da API
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', auth, chatRoutes);
+app.use('/api/analytics', analyticsRoutes); // [REQ-006] Registrada aqui!
 
-// Fallback para o front-end
+// Rota direta para o Dashboard
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'chat_frontend', 'dashboard.html'));
+});
+
+// Fallback SPA
 app.use((req, res) => {
     res.sendFile(path.join(__dirname, 'chat_frontend', 'index.html'));
 });
 
 // ==========================================
-// ⚡ WEBSOCKETS (SOCKET.IO) - SPRINT 7
+// ⚡ WEBSOCKETS (SOCKET.IO) COM TELEMETRIA
 // ==========================================
-
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 let usuariosOnline = 0;
 
-// 🔒 SEGURANÇA NO SOCKET: Middleware de Autenticação JWT
 io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
-    if (!token) {
-        return next(new Error('Acesso negado: Token não fornecido no WebSocket.'));
-    }
+    if (!token) return next(new Error('Acesso negado: Token não fornecido.'));
 
     try {
         const payload = jwt.verify(token, process.env.JWT_SECRET);
-        socket.usuario = payload; // Guarda dados do usuário (id, email) no socket
+        socket.usuario = payload;
         next();
     } catch (err) {
-        return next(new Error('Acesso negado: Token inválido ou expirado.'));
+        next(new Error('Acesso negado: Token inválido.'));
     }
 });
 
 io.on('connection', (socket) => {
     usuariosOnline++;
-    // Avisa a todos o novo total de usuários online (Desafio Hacker)
     io.emit('usuariosOnline', usuariosOnline);
 
-    console.log(`🟢 [Socket] ${socket.usuario.email} conectado (${socket.id}) | Online: ${usuariosOnline}`);
-
-    // DESAFIO HACKER: Indicador de Digitação
     socket.on('digitando', (isDigitando) => {
         socket.broadcast.emit('usuarioDigitando', {
             email: socket.usuario.email,
@@ -84,7 +86,6 @@ io.on('connection', (socket) => {
         });
     });
 
-    // ESCUTA DE MENSAGENS EM TEMPO REAL
     socket.on('novaMensagem', async (dados) => {
         const texto = dados?.texto?.trim();
         if (!texto) return;
@@ -99,29 +100,48 @@ io.on('connection', (socket) => {
             timestamp: timestamp
         };
 
-        // 1. BROADCAST: Envia a mensagem do usuário para TODOS na sala
         io.emit('mensagemRecebida', mensagemUsuario);
 
-        // 2. GATILHO DA IA: Se contiver @gemini, a IA modera/responde
+        // Registra mensagem humana no Mongo
+        try {
+            await Mensagem.create({
+                usuarioId: socket.usuario.id,
+                remetente: 'user',
+                texto: texto,
+                tokensGastos: 0
+            });
+        } catch (e) {
+            console.error("Erro ao salvar mensagem do usuário:", e);
+        }
+
+        // Gatilho do Moderador Gemini
         if (texto.toLowerCase().includes('@gemini')) {
-            // Emite aviso de que o Gemini está digitando
             io.emit('usuarioDigitando', { email: '🤖 Moderador Gemini', digitando: true });
 
             try {
                 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-                
-                const promptModerador = `
-Você é o "🤖 Moderador Gemini" em uma sala de bate-papo pública em tempo real.
-O usuário "${socket.usuario.email}" mencionou você com a mensagem: "${texto}".
+                const prompt = `Você é o Moderador Gemini no chat em tempo real. Usuário ${socket.usuario.email} disse: "${texto}". Responda em no máximo 2 frases curtas e objetivas em português.`;
 
-Instruções:
-- Seja conciso, amigável e direto (máximo de 2 a 3 frases).
-- Se houver linguagem inadequada ou ofensiva, modere com respeito e postura.
-- Responda em português.
-`;
-
-                const result = await model.generateContent(promptModerador);
+                const result = await model.generateContent(prompt);
                 const respostaIA = result.response.text();
+
+                // [REQ-004] Captura de tokens no WebSocket
+                const tokensGastos = result.response.usageMetadata?.totalTokenCount || 0;
+
+                // [REQ-004] Salva no Mongo com telemetria
+                await Mensagem.create({
+                    usuarioId: socket.usuario.id,
+                    remetente: 'bot',
+                    texto: respostaIA,
+                    tokensGastos: tokensGastos
+                });
+
+                // 🚀 DESAFIO HACKER: Emite o evento em tempo real para o Dashboard!
+                io.emit('novoGastoDeToken', {
+                    tokens: tokensGastos,
+                    autor: socket.usuario.email,
+                    timestamp: timestamp
+                });
 
                 const mensagemBot = {
                     id: (Date.now() + 1).toString(),
@@ -134,15 +154,8 @@ Instruções:
                 io.emit('usuarioDigitando', { email: '🤖 Moderador Gemini', digitando: false });
                 io.emit('mensagemRecebida', mensagemBot);
             } catch (err) {
-                console.error("Erro na resposta do Gemini via Socket:", err);
+                console.error("Erro no Gemini Socket:", err);
                 io.emit('usuarioDigitando', { email: '🤖 Moderador Gemini', digitando: false });
-                io.emit('mensagemRecebida', {
-                    id: Date.now().toString(),
-                    autor: '🤖 Moderador Gemini',
-                    tipo: 'bot',
-                    texto: 'Tive uma oscilação na minha conexão quântica. Tente me chamar novamente!',
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                });
             }
         }
     });
@@ -150,18 +163,14 @@ Instruções:
     socket.on('disconnect', () => {
         usuariosOnline = Math.max(0, usuariosOnline - 1);
         io.emit('usuariosOnline', usuariosOnline);
-        socket.broadcast.emit('usuarioDigitando', { email: socket.usuario.email, digitando: false });
-        console.log(`🔴 [Socket] ${socket.usuario.email} desconectado | Online: ${usuariosOnline}`);
     });
 });
 
-// Conexão com MongoDB
 if (process.env.MONGO_URI) {
     mongoose.connect(process.env.MONGO_URI)
         .then(() => console.log("✅ Conectado ao MongoDB"))
         .catch(err => console.error("❌ Erro ao conectar ao MongoDB:", err.message));
 }
 
-// ⚠️ ATENÇÃO: Usar server.listen (e NÃO app.listen) para o Socket.io funcionar!
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Servidor Real-Time rodando na porta ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));

@@ -3,7 +3,7 @@ const Mensagem = require('../models/Mensagem');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Função da ferramenta de Clima
+// Ferramenta de clima
 async function buscarClimaTempoReal(cidade) {
     const weatherKey = process.env.WEATHER_API_KEY;
     const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cidade)}&units=metric&lang=pt_br&appid=${weatherKey}`;
@@ -21,10 +21,9 @@ async function buscarClimaTempoReal(cidade) {
     }
 }
 
-// Declaração da Tool
 const declaracaoClima = {
     name: "buscarClimaTempoReal",
-    description: "Obtém a temperatura e clima de uma cidade. Use sempre que o usuário perguntar de tempo ou temperatura.",
+    description: "Obtém a temperatura e clima de uma cidade.",
     parameters: {
         type: "OBJECT",
         properties: {
@@ -43,12 +42,11 @@ exports.conversar = async (req, res) => {
             return res.status(400).json({ erro: "Pergunta não informada." });
         }
 
-        // Salva a mensagem do usuário no banco
-        await Mensagem.create({ usuarioId, remetente: 'user', texto: pergunta });
+        // Mensagem enviada pelo usuário (0 tokens gastos)
+        await Mensagem.create({ usuarioId, remetente: 'user', texto: pergunta, tokensGastos: 0 });
 
-        // Inicializa Gemini com Ferramenta
         const model = genAI.getGenerativeModel({
-            model: "gemini-2.5-flash",
+            model: "gemini-2.0-flash",
             tools: [{ functionDeclarations: [declaracaoClima] }]
         });
 
@@ -58,9 +56,13 @@ exports.conversar = async (req, res) => {
         let result = await chat.sendMessage(promptYoda);
         let response = result.response;
 
-        // Loop de Function Calling
-        const call = response.functionCalls()?.[0];
         let respostaFinalTexto = "";
+        let tokensTotais = 0;
+
+        // [REQ-004] Captura de metadados da SDK
+        tokensTotais += result.response.usageMetadata?.totalTokenCount || 0;
+
+        const call = response.functionCalls()?.[0];
 
         if (call && call.name === "buscarClimaTempoReal") {
             const dadosClima = await buscarClimaTempoReal(call.args.cidade);
@@ -71,14 +73,21 @@ exports.conversar = async (req, res) => {
                 }
             }]);
             respostaFinalTexto = result2.response.text();
+            // Acumula tokens da segunda volta do chat se houver function call
+            tokensTotais += result2.response.usageMetadata?.totalTokenCount || 0;
         } else {
             respostaFinalTexto = response.text();
         }
 
-        // Salva a resposta do bot no banco
-        await Mensagem.create({ usuarioId, remetente: 'bot', texto: respostaFinalTexto });
+        // [REQ-004] Persistência do custo em tokens no MongoDB
+        await Mensagem.create({ 
+            usuarioId, 
+            remetente: 'bot', 
+            texto: respostaFinalTexto,
+            tokensGastos: tokensTotais 
+        });
 
-        res.json({ resposta: respostaFinalTexto });
+        res.json({ resposta: respostaFinalTexto, tokensGastos: tokensTotais });
     } catch (erro) {
         console.error("Erro no chat:", erro);
         res.status(500).json({ erro: "Erro ao processar mensagem com a IA." });
